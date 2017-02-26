@@ -1,0 +1,7 @@
+aws.sh
+.DS_Store
+input/vgg/*
+output/*
+lib/__pycache__
+*.pyc
+papers/*
