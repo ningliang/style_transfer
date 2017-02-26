@@ -47,6 +47,7 @@ class StyleTransfer:
         self.content_loss = self.build_content_loss(self.vgg, self.content_img)
         self.variational_loss = self.build_variational_loss()
 
+    # LBFGS optimizer
     def optimize_loss(self, loss_tensor, steps=10):
         result = None
         checkpoints = []
@@ -64,6 +65,9 @@ class StyleTransfer:
                 x, loss_value, info = fmin_l_bfgs_b(evaluator.loss, x0=x0, fprime=evaluator.grad, maxfun=20)
                 self.print_status(loss_value, step, start_time)
 
+                # Clip output
+                x = np.clip(x, 0, 1)
+
                 result = self.output_to_image(x.reshape(self.input_img.get_shape()))
                 cv2.imwrite('output/steps/{}.jpg'.format(step), result)
 
@@ -76,7 +80,8 @@ class StyleTransfer:
 
         return result, checkpoints
 
-    def optimize_loss_adam(self, loss_tensor, steps=100, checkpoint_interval=10):
+    # SGD optimizer
+    def optimize_loss_adam(self, loss_tensor, steps=1000, checkpoint_interval=10):
         result = None
         checkpoints = []
 
@@ -89,10 +94,15 @@ class StyleTransfer:
             sess.run(init_op)
             for step in range(steps):
                 sess.run(train)
+
+                # Clip the output
+                generated = self.input_img.eval(session=sess)
+                generated = np.clip(generated, 0, 1)
+                sess.run(self.input_img.assign(generated))
+
                 if step % checkpoint_interval == 0:
-                    generated = self.input_img.eval(session=sess)
                     result = self.output_to_image(generated)
-                    cv2.imwrite('output/steps/{}.jpg'.format(step), result)
+                    cv2.imwrite('output/steps/{:04d}.jpg'.format(step), result)
 
                     loss = sess.run([loss_tensor])[0]
                     checkpoint = {
