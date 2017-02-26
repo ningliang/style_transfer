@@ -17,5 +17,9 @@ content_img = cv2.imread(content_path).astype(np.uint8)
 vgg = vgg19.Vgg19('input/vgg/vgg19_conv.npy', True)
 
 transfer = StyleTransfer(content_img, style_img, vgg, 1024)
+
+style_img, style_checkpoints = transfer.generate_style_image(1000)
+cv2.imwrite('output/style.jpg', style_img)
+
 combined_img, combined_checkpoints = transfer.generate_combined_image(0.001, 1, 1, 1000)
 cv2.imwrite('output/combined.jpg', combined_img)
