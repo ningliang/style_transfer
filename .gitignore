@@ -5,3 +5,5 @@ output/*
 lib/__pycache__
 *.pyc
 papers/*
+input/images/content/diana*
+input/images/portrait/diana*

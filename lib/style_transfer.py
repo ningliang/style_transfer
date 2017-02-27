@@ -18,20 +18,20 @@ class StyleTransfer:
         self.build()
 
     def generate_style_image(self, steps=100):
-        return self.optimize_loss_adam(self.style_loss, steps)
+        return self.optimize_loss_lbfgs(self.style_loss, steps)
 
     def generate_content_image(self, steps=100):
-        return self.optimize_loss_adam(self.content_loss, steps)
+        return self.optimize_loss_lbfgs(self.content_loss, steps)
 
     def generate_combined_image(self, content_weight, style_weight, variational_weight, steps=100):
         combined_loss = content_weight * self.content_loss + \
             style_weight * self.style_loss + \
             variational_weight * self.variational_loss
-        return self.optimize_loss_adam(combined_loss, steps)
+        return self.optimize_loss_lbfgs(combined_loss, steps)
 
     def build(self):
         shape = self.content_img.shape
-        self.input_img = tf.Variable(tf.random_uniform((1, shape[0], shape[1], shape[2]), 0.25, 0.75))
+        self.input_img = tf.Variable(tf.truncated_normal((1, shape[0], shape[1], shape[2]), 0.5, 0.05))
         self.vgg.build(self.input_img)
 
         # Build the style tensors
@@ -48,7 +48,7 @@ class StyleTransfer:
         self.variational_loss = self.build_variational_loss()
 
     # LBFGS optimizer
-    def optimize_loss(self, loss_tensor, steps=10):
+    def optimize_loss_lbfgs(self, loss_tensor, steps=10):
         result = None
         checkpoints = []
 
@@ -85,7 +85,8 @@ class StyleTransfer:
         result = None
         checkpoints = []
 
-        optimizer = tf.train.AdamOptimizer(0.01)
+        rate = tf.Variable(0.01)
+        optimizer = tf.train.AdamOptimizer(rate)
         train = optimizer.minimize(loss_tensor, var_list=[self.input_img])
 
         start_time = time.time()
@@ -143,7 +144,7 @@ class StyleTransfer:
 
             # Compute loss
             style_tensor = self.style_tensors[name]
-            style_value_var = tf.Variable(style_value)
+            style_value_var = tf.constant(style_value)
             loss = const * tf.reduce_sum(tf.square(style_value_var - style_tensor))
             losses.append(loss)
 
@@ -152,14 +153,14 @@ class StyleTransfer:
     def build_content_loss(self, vgg, content_img):
         content_layer = getattr(vgg, self.CONTENT_LAYER)
         content_value = self.eval(content_img, [content_layer])
-        content_value_var = tf.Variable(content_value[0])
+        content_value_var = tf.constant(content_value[0])
         return tf.reduce_sum(tf.square(content_layer - content_value_var))
 
     def build_variational_loss(self):
         height, width, channels = self.content_img.shape
         y_del = tf.square(self.input_img[:,1:,:width-1,:] - self.input_img[:,:height-1,:width-1,:])
         x_del = tf.square(self.input_img[:,:height-1,1:,:] - self.input_img[:,:height-1,:width-1,:])
-        return tf.reduce_sum(tf.pow(x_del + y_del, 1.25))
+        return tf.reduce_sum(tf.pow(x_del + y_del, 2))
 
     def eval(self, img, tensors):
         init_op = tf.global_variables_initializer()
@@ -181,22 +182,25 @@ class StyleTransfer:
         h_ratio = ct_height / float(st_height)
         w_ratio = ct_width / float(st_width)
         ct_st_ratio = max(h_ratio, w_ratio)
+
         style_img_resized = cv2.resize(style_img, (
             int(math.ceil(st_width * ct_st_ratio)),
             int(math.ceil(st_height * ct_st_ratio))
-        ))
+        ), cv2.INTER_CUBIC)
 
         # Crop a content_img sized style_img chunk
-        half_width = int(ct_width / 2)
-        half_height = int(ct_height / 2)
-        style_img_cropped = style_img_resized[
-            (int(style_img_resized.shape[0] / 2) - half_height):(int(style_img_resized.shape[0] / 2) + half_height),
-            (int(style_img_resized.shape[1] / 2) - half_width):(int(style_img_resized.shape[1] / 2) + half_width),
-        ]
+        half_width = ct_width / 2.0
+        half_height = ct_height / 2.0
+
+        h_min = int(math.floor(style_img_resized.shape[0] / 2.0 - half_height))
+        h_max = int(math.floor(style_img_resized.shape[0] / 2.0 + half_height))
+        w_min = int(math.floor(style_img_resized.shape[1] / 2.0 - half_width))
+        w_max = int(math.floor(style_img_resized.shape[1] / 2.0 + half_width))
+        style_img_cropped = style_img_resized[h_min:h_max, w_min:w_max]
 
         # Write the two images out for inspection
         cv2.imwrite('output/content.jpg', content_img_resized)
-        cv2.imwrite('output/style.jpg', style_img_resized)
+        cv2.imwrite('output/style.jpg', style_img_cropped)
 
         # Rescale if necessary
         if np.max(content_img_resized > 1):
@@ -205,7 +209,7 @@ class StyleTransfer:
         if np.max(style_img_cropped > 1):
             style_img_cropped = style_img_cropped / 255.0
 
-        # print("Content and style size: ", content_img_resized.shape, style_img_cropped.shape)
+        print("Content and style size: ", content_img_resized.shape, style_img_resized.shape, style_img_cropped.shape)
         assert(content_img_resized.shape == style_img_cropped.shape)
         return content_img_resized, style_img_cropped
 
@@ -216,7 +220,7 @@ class StyleTransfer:
             ratio = float(size) / max_dim
             new_width = int(math.ceil(width * ratio))
             new_height = int(math.ceil(height * ratio))
-            result = cv2.resize(img, (new_width, new_height))
+            result = cv2.resize(img, (new_width, new_height), cv2.INTER_CUBIC)
         else:
             result = img
         return result
